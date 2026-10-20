@@ -1,4 +1,7 @@
-"""Interactive drawing of the Naga V2 Pro with button callouts."""
+"""Interactive drawing of the mouse with button callouts.
+
+The supported models share this outline; they differ in the two small
+buttons behind the wheel (layout.MODEL.centre_buttons)."""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QLinearGradient
                            QPainter, QPainterPath, QPen, QRadialGradient, QTransform)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from .. import layout
 from ..layout import BUTTONS_BY_ID, SIDE_PLATES
 from . import theme
 
@@ -46,8 +50,9 @@ BODY = _body_path()
 THUMB_EDGE = _thumb_edge()
 CHANNEL = QRectF(CX - 20, 90, 40, 180)
 WHEEL = QRectF(CX - 16, 104, 32, 84)
-MODE_BTN = QRectF(CX - 12, 200, 24, 17)
-DPI_BTN = QRectF(CX - 12, 228, 24, 17)
+# The two small buttons behind the wheel: front and rear.
+FRONT_BTN = QRectF(CX - 12, 200, 24, 17)
+REAR_BTN = QRectF(CX - 12, 228, 24, 17)
 LOGO = QPointF(CX + 4, 400)
 BOTTOM_BTN = QPointF(CX + 4, 492)
 
@@ -75,6 +80,7 @@ LEFT_X, RIGHT_X = CX - 172 - CARD_W, CX + 166
 
 def _callouts() -> list[Callout]:
     rows = [58, 130, 202, 274, 346]
+    front, rear = layout.MODEL.centre_buttons
     return [
         Callout(0x01, QRectF(LEFT_X, rows[0], CARD_W, CARD_H), QPointF(CX - 64, 176)),
         Callout(0x09, QRectF(LEFT_X, rows[1], CARD_W, CARD_H), QPointF(CX, 108)),
@@ -84,12 +90,9 @@ def _callouts() -> list[Callout]:
         Callout(0x02, QRectF(RIGHT_X, rows[0], CARD_W, CARD_H), QPointF(CX + 64, 176)),
         Callout(0x03, QRectF(RIGHT_X, rows[1], CARD_W, CARD_H), QPointF(CX + 6, 138)),
         Callout(0x35, QRectF(RIGHT_X, rows[2], CARD_W, CARD_H), QPointF(CX + 16, 148)),
-        Callout(0x6D, QRectF(RIGHT_X, rows[3], CARD_W, CARD_H), MODE_BTN.center()),
-        Callout(0x60, QRectF(RIGHT_X, rows[4], CARD_W, CARD_H), DPI_BTN.center()),
+        Callout(front, QRectF(RIGHT_X, rows[3], CARD_W, CARD_H), FRONT_BTN.center()),
+        Callout(rear, QRectF(RIGHT_X, rows[4], CARD_W, CARD_H), REAR_BTN.center()),
     ]
-
-
-CALLOUTS = _callouts()
 
 # Side plate area, to the left of the mouse (seen from the left side, so the
 # front of the mouse is on the left).
@@ -163,15 +166,16 @@ class MouseCanvas(QWidget):
         for button, rect in plate_tiles(self.plate):
             if rect.contains(p):
                 return button
-        for c in CALLOUTS:
+        for c in _callouts():
             if c.card.contains(p):
                 return c.button
         if WHEEL.contains(p):
             return 0x03
-        if MODE_BTN.adjusted(-3, -3, 3, 3).contains(p):
-            return 0x6D
-        if DPI_BTN.adjusted(-3, -3, 3, 3).contains(p):
-            return 0x60
+        front, rear = layout.MODEL.centre_buttons
+        if FRONT_BTN.adjusted(-3, -3, 3, 3).contains(p):
+            return front
+        if REAR_BTN.adjusted(-3, -3, 3, 3).contains(p):
+            return rear
         if (p - BOTTOM_BTN).manhattanLength() < 24:
             return 0x0E
         if LEFT_BTN.contains(p):
@@ -286,7 +290,8 @@ class MouseCanvas(QWidget):
         p.setPen(QPen(strip, 2))
         p.drawLine(QPointF(CX, WHEEL.top() + 4), QPointF(CX, WHEEL.bottom() - 4))
 
-        for rect, button in ((MODE_BTN, 0x6D), (DPI_BTN, 0x60)):
+        front, rear = layout.MODEL.centre_buttons
+        for rect, button in ((FRONT_BTN, front), (REAR_BTN, rear)):
             color = self._state_color(button)
             p.setBrush(QColor("#262626") if color is None else color.darker(160))
             p.setPen(QPen(color or QColor("#4a4a4a"), 1.4))
@@ -327,7 +332,7 @@ class MouseCanvas(QWidget):
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(THUMB_EDGE)
 
-        for c in CALLOUTS:
+        for c in _callouts():
             self._paint_callout(p, c)
 
     def _paint_callout(self, p: QPainter, c: Callout) -> None:

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QFrame, QGridLayout, QHB
                                QLabel, QPushButton, QRadioButton, QScrollArea, QSlider,
                                QSpinBox, QVBoxLayout, QWidget)
 
+from .. import layout
 from ..layout import DPI_MAX, DPI_MIN, MAX_DPI_STAGES, POLLING_RATES
 from .controller import Controller
 from .widgets import Segmented, dim, section
@@ -49,6 +50,11 @@ class StageRow:
         self.slider.blockSignals(False)
         if self.linked:
             self.y.setValue(value)
+
+    def set_maximum(self, maximum: int):
+        self.slider.setRange(DPI_MIN // STEP, maximum // STEP)
+        for spin in (self.x, self.y):
+            spin.setMaximum(maximum)
 
     def set_visible(self, visible: bool, xy: bool):
         for w in (self.radio, self.slider, self.x):
@@ -95,7 +101,7 @@ class PerformancePage(QWidget):
         self.xy = QCheckBox("Separate X / Y sensitivity")
         head.addWidget(self.xy)
         lay.addLayout(head)
-        lay.addWidget(dim("The DPI button cycles through these stages. The selected stage "
+        lay.addWidget(dim("The DPI button(s) step through these stages. The selected stage "
                           "is the one the profile starts with."))
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
@@ -176,6 +182,7 @@ class PerformancePage(QWidget):
         self.dpi_save.clicked.connect(self._save_dpi)
         self.dpi_revert.clicked.connect(self.refresh)
         self.rate.changed.connect(self._save_rate)
+        ctl.connectionChanged.connect(lambda ok, _msg: ok and self._set_dpi_max(layout.dpi_max()))
         ctl.profileLoaded.connect(lambda s: s == ctl.current_slot and self.refresh())
         ctl.performanceChanged.connect(lambda s: s == ctl.current_slot and self.refresh())
         ctl.currentSlotChanged.connect(lambda _s: self.refresh())
@@ -233,6 +240,10 @@ class PerformancePage(QWidget):
         stages = [row.value() for row in self.rows[:self.count.value()]]
         active = self.active.checkedId() + 1
         self.ctl.set_dpi_stages(self.ctl.current_slot, stages, active)
+
+    def _set_dpi_max(self, maximum: int) -> None:
+        for row in self.rows:
+            row.set_maximum(maximum)
 
     def _save_rate(self, index: int) -> None:
         self.ctl.set_polling(self.ctl.current_slot, RATE_TO_INTERVAL[RATES[index]])

@@ -77,6 +77,7 @@ class CustomizePage(QWidget):
         ctl.macrosChanged.connect(self._macros_changed)
         ctl.profilesChanged.connect(lambda: self.panel.set_profile_names(ctl.names))
         ctl.currentSlotChanged.connect(lambda _s: self.refresh())
+        ctl.connectionChanged.connect(self._connection_changed)
         self._update_hint()
 
     # ------------------------------------------------------------ helpers
@@ -129,6 +130,11 @@ class CustomizePage(QWidget):
         if sel is not None and BUTTONS_BY_ID[sel].group.startswith("side") and \
                 BUTTONS_BY_ID[sel].group != PLATES[index]:
             self.canvas.selected = None
+        self.canvas.update()
+
+    def _connection_changed(self, connected: bool, _msg: str) -> None:
+        # The connected model decides the drawing and the available actions.
+        self.panel.update_categories()
         self.canvas.update()
 
     def _select(self, button: int) -> None:

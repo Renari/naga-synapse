@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QHBoxLayout, QLabel, QMa
                                QStatusBar, QVBoxLayout, QWidget)
 
 from ..actions import PROFILE_COLORS
+from .. import layout
 from ..layout import PROFILE_COLOR_HEX
 from . import theme
 from .controller import Controller
@@ -24,7 +25,7 @@ class DisconnectedPage(QWidget):
         super().__init__()
         lay = QVBoxLayout(self)
         lay.addStretch(2)
-        title = QLabel("Connect your Razer Naga V2 Pro")
+        title = QLabel("Connect your Razer Naga")
         title.setObjectName("PanelTitle")
         title.setStyleSheet("font-size: 18pt;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.ctl = ctl
         self.settings = QSettings("nagasynapse", "nagasynapse")
-        self.setWindowTitle("Naga Synapse — Razer Naga V2 Pro")
+        self.setWindowTitle("Naga Synapse")
         self.resize(1480, 860)
         self.setMinimumSize(1180, 720)
 
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
             self.active_label.setText("")
 
     def _info(self) -> None:
+        self.setWindowTitle(f"Naga Synapse — {layout.MODEL.name}")
         info = self.ctl.info
         if not info:
             return
