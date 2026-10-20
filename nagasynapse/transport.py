@@ -137,6 +137,7 @@ class HidrawInfo:
     pid: int
     interface: int
     name: str
+    phys: str = ""      # HID_PHYS, e.g. "usb-0000:0d:00.3-2.4.2.1/input0"
 
 
 def _read_uevent(path: Path) -> dict[str, str]:
@@ -177,9 +178,23 @@ def find_control_interfaces() -> list[HidrawInfo]:
         interface = int(phys.rsplit("input", 1)[-1]) if "input" in phys else -1
         found.append(HidrawInfo(
             path=f"/dev/{node.name}", vid=vid, pid=pid, interface=interface,
-            name=SUPPORTED_DEVICES[pid][0],
+            name=SUPPORTED_DEVICES[pid][0], phys=phys,
         ))
     return found
+
+
+def find_event_interface(info: HidrawInfo) -> str | None:
+    """hidraw node of the same mouse's USB interface 1.
+
+    That interface carries the mouse's notification reports (report id 5),
+    e.g. `05 0e <plate>` when the side plate is swapped on the Naga Pro."""
+    if "/input" not in info.phys:
+        return None
+    wanted = info.phys.rsplit("/input", 1)[0] + "/input1"
+    for node in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
+        if _read_uevent(node / "device" / "uevent").get("HID_PHYS") == wanted:
+            return f"/dev/{node.name}"
+    return None
 
 
 class HidrawTransport:

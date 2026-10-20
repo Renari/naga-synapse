@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
 
 from ..actions import Action
 from ..device import DeviceInfo, FlashUsage, NagaDevice, ProfileData
-from ..layout import default_action
+from ..layout import PLATE_BY_VALUE, default_action
 from ..macros import Macro
-from ..transport import DeviceDisconnected, DeviceNotFound, RazerError
+from ..transport import (DeviceDisconnected, DeviceNotFound, RazerError,
+                         find_event_interface)
 
 
 class _Bridge(QObject):
@@ -51,6 +53,8 @@ class Controller(QObject):
         self.current_slot: int = 1
         self.plate: str | None = None        # attached side plate, if the mouse reports it
         self.plate_supported = False
+        self._event_fd = -1
+        self._event_notifier: QSocketNotifier | None = None
         self._pending = 0
         self._connecting = False
 
@@ -128,6 +132,7 @@ class Controller(QObject):
             callback(result)
 
     def shutdown(self) -> None:
+        self._stop_events()
         self._reconnect.stop()
         self._battery.stop()
         self._pool.shutdown(wait=True, cancel_futures=True)
@@ -182,6 +187,7 @@ class Controller(QObject):
             self.macrosChanged.emit()
             self.flashChanged.emit()
             self.plateChanged.emit(self.plate)
+            self._watch_events()
             self.currentSlotChanged.emit(self.current_slot)
             self.load_profile(self.current_slot)
 
@@ -212,10 +218,51 @@ class Controller(QObject):
 
         # Close on the worker thread so it cannot race an in-flight command.
         self._pool.submit(close)
+        self._stop_events()
         self.profiles.clear()
         self._battery.stop()
         self.connectionChanged.emit(False, msg or "The mouse was disconnected.")
         self._reconnect.start()
+
+    # ------------------------------------------------- mouse notifications
+    def _watch_events(self) -> None:
+        """Listen for the mouse's own notifications, so a side-plate swap
+        shows at once instead of on the next poll."""
+        self._stop_events()
+        path = find_event_interface(self.dev.hid) if self.dev else None
+        if not path:
+            return
+        try:
+            self._event_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        except OSError:
+            return
+        self._event_notifier = QSocketNotifier(self._event_fd, QSocketNotifier.Type.Read, self)
+        self._event_notifier.activated.connect(self._read_events)
+
+    def _stop_events(self) -> None:
+        if self._event_notifier is not None:
+            self._event_notifier.setEnabled(False)
+            self._event_notifier.deleteLater()
+            self._event_notifier = None
+        if self._event_fd >= 0:
+            os.close(self._event_fd)
+            self._event_fd = -1
+
+    def _read_events(self, *_args) -> None:
+        while self._event_fd >= 0:
+            try:
+                data = os.read(self._event_fd, 64)
+            except BlockingIOError:
+                return
+            except OSError:  # unplugged; the command channel notices too
+                self._stop_events()
+                return
+            if len(data) >= 3 and data[0] == 0x05 and data[1] == 0x0E:
+                plate = PLATE_BY_VALUE.get(data[2])
+                self.plate_supported = True
+                if plate != self.plate:
+                    self.plate = plate
+                    self.plateChanged.emit(plate)
 
     def _poll(self) -> None:
         """Track changes made on the mouse itself (profile button, side plate,
