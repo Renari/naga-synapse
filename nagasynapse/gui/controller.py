@@ -386,6 +386,19 @@ class Controller(QObject):
 
         self.run(work, done)
 
+    def set_lift_off(self, slot: int, value: int) -> None:
+        def work(dev):
+            dev.set_lift_off(slot, value)
+            return dev.lift_off(slot)
+
+        def done(stored):
+            if slot in self.profiles:
+                self.profiles[slot].lift_off = stored
+            self.performanceChanged.emit(slot)
+            self.status.emit("Lift-off distance saved")
+
+        self.run(work, done)
+
     def set_polling(self, slot: int, interval: int) -> None:
         def work(dev):
             dev.set_polling_interval(slot, interval)

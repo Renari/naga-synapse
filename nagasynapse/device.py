@@ -13,7 +13,8 @@ from typing import Callable
 
 from . import layout
 from .actions import Action
-from .layout import BUTTON_IDS, PROFILE_SLOTS, POLLING_RATES, default_action
+from .layout import (BUTTON_IDS, LIFT_OFF, PROFILE_SLOTS, POLLING_RATES,
+                     default_action)
 from .macros import Macro
 from .transport import (HidrawInfo, HidrawTransport, RazerError, STATUS_FAIL,
                         open_device)
@@ -62,6 +63,7 @@ class ProfileData:
     dpi_stages: list[tuple[int, int]] = field(default_factory=list)
     dpi_active: int = 1
     polling_interval: int = 1
+    lift_off: int | None = None     # None when the mouse doesn't support it
 
     def binding(self, button_id: int, layer: int = 0) -> Action:
         return self.bindings.get((button_id, layer), default_action(button_id))
@@ -78,6 +80,7 @@ class ProfileData:
             "dpi_stages": [list(s) for s in self.dpi_stages],
             "dpi_active": self.dpi_active,
             "polling_rate": POLLING_RATES.get(self.polling_interval, 1000),
+            **({"lift_off": self.lift_off} if self.lift_off is not None else {}),
         }
 
     @classmethod
@@ -93,6 +96,7 @@ class ProfileData:
             dpi_stages=[(int(x), int(y)) for x, y in obj.get("dpi_stages", [])],
             dpi_active=int(obj.get("dpi_active", 1)),
             polling_interval=rate_to_interval.get(int(obj.get("polling_rate", 1000)), 1),
+            lift_off=int(obj["lift_off"]) if "lift_off" in obj else None,
         )
 
 
@@ -196,6 +200,20 @@ class NagaDevice:
             except RazerError:
                 self._button_ids = list(BUTTON_IDS)
         return self._button_ids
+
+    # ----------------------------------------------------------- sensor
+    def lift_off(self, slot: int) -> int:
+        """Lift-off distance setting (see layout.LIFT_OFF)."""
+        a = self._cmd(0x0B, 0x8B, bytes([slot, 0x04]), 4).args
+        return (a[2] << 8) | a[3]
+
+    def set_lift_off(self, slot: int, value: int) -> None:
+        resp = self._cmd(0x0B, 0x0B, bytes([slot, 0x04, value >> 8, value & 0xFF]),
+                         check=False)
+        # Resetting to 0 (default) answers "fail" on the Naga Pro but does
+        # reset, so trust the read-back.
+        if resp.status != 2 and self.lift_off(slot) != value:
+            raise RazerError("lift-off write failed", resp.status)
 
     # ----------------------------------------------------------- profiles
     def profile_slot_count(self) -> int:
@@ -470,6 +488,10 @@ class NagaDevice:
                 report(f"Reading profile {slot}…", n / total)
         data.dpi_stages, data.dpi_active = self.get_dpi_stages(slot)
         data.polling_interval = self.get_polling_interval(slot)
+        try:
+            data.lift_off = self.lift_off(slot)
+        except RazerError:
+            data.lift_off = None
         report("Done", 1.0)
         return data
 
@@ -496,6 +518,12 @@ class NagaDevice:
             self.set_dpi_stages(slot, data.dpi_stages, data.dpi_active)
         if data.polling_interval:
             self.set_polling_interval(slot, data.polling_interval)
+        if data.lift_off is not None and data.lift_off in LIFT_OFF and \
+                (previous is None or previous.lift_off != data.lift_off):
+            try:
+                self.set_lift_off(slot, data.lift_off)
+            except RazerError:
+                pass  # older profile files or mice without lift-off settings
         if data.name and data.name != (previous.name if previous else self.profile_name(slot)):
             self.set_profile_name(slot, data.name)
         report("Done", 1.0)

@@ -147,6 +147,17 @@ DPI_MIN = 100
 DPI_MAX = 30000  # highest of any supported model; see dpi_max() for the current one
 MAX_DPI_STAGES = 5
 
+# Lift-off distance (0b:8b / 0b:0b) values. 0 means the firmware default.
+LIFT_OFF = {
+    0x0000: "Default",
+    0x0100: "1 mm",
+    0x0101: "2 mm",
+    0x0102: "3 mm",
+    0x0200: "Asymmetric 1–2 mm",
+    0x0201: "Asymmetric 1–3 mm",
+    0x0202: "Asymmetric 2–3 mm",
+}
+
 
 def default_action(button_id: int) -> Action:
     button = BUTTONS_BY_ID.get(button_id)
