@@ -247,7 +247,7 @@ def _import_profile(dev: NagaDevice, obj: dict, slot: int) -> None:
         m.id = None
         macro_map[old_id] = dev.write_macro(m, progress=_progress)
     data = ProfileData.from_json(obj, slot)
-    dev.write_profile(slot, data, progress=_progress, macro_map=macro_map)
+    return dev.write_profile(slot, data, progress=_progress, macro_map=macro_map)
 
 
 def cmd_export(dev: NagaDevice, args) -> None:
@@ -259,8 +259,10 @@ def cmd_export(dev: NagaDevice, args) -> None:
 def cmd_import(dev: NagaDevice, args) -> None:
     slot = _slot(dev, args.profile)
     obj = json.loads(Path(args.file).read_text())
-    _import_profile(dev, obj, slot)
+    skipped = _import_profile(dev, obj, slot)
     print(f"imported {args.file} into profile {slot}")
+    if skipped:
+        print(f"skipped {len(skipped)} bindings for buttons this mouse doesn't have")
 
 
 def _backup_obj(dev: NagaDevice) -> dict:
@@ -303,8 +305,11 @@ def cmd_restore(dev: NagaDevice, args) -> None:
     dev.compact_flash(progress=_progress)
     for m in macros:
         dev.write_macro(m, progress=_progress)
+    skipped = 0
     for slot, data in profiles.items():
-        dev.write_profile(slot, data, progress=_progress)
+        skipped += len(dev.write_profile(slot, data, progress=_progress))
+    if skipped:
+        print(f"skipped {skipped} bindings for buttons this mouse doesn't have")
     for slot in dev.profiles():
         if slot not in profiles:
             dev.delete_profile(slot)

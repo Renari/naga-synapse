@@ -13,7 +13,7 @@ from typing import Callable
 
 from . import layout
 from .actions import Action
-from .layout import LIFT_OFF, PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES, default_action
+from .layout import PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES, default_action
 from .macros import Macro
 from .transport import (HidrawInfo, HidrawTransport, RazerError, STATUS_FAIL,
                         open_device)
@@ -309,6 +309,9 @@ class NagaDevice:
         if not 1 <= len(stages) <= 5:
             raise ValueError("between 1 and 5 DPI stages are required")
         active = max(1, min(active, len(stages)))
+        top = self.model.dpi_max
+        stages = [(max(layout.DPI_MIN, min(top, x)), max(layout.DPI_MIN, min(top, y)))
+                  for x, y in stages]
         body = b"".join(struct.pack(">BHHxx", i + 1, x, y) for i, (x, y) in enumerate(stages))
         body = body.ljust(35, b"\0")
         self._cmd(0x04, 0x06, bytes([slot, active, len(stages)]) + body)
@@ -505,13 +508,19 @@ class NagaDevice:
     def write_profile(self, slot: int, data: ProfileData,
                       progress: Progress | None = None,
                       previous: ProfileData | None = None,
-                      macro_map: dict[int, int] | None = None) -> None:
+                      macro_map: dict[int, int] | None = None) -> list[tuple[int, int]]:
         """Write a whole profile. Only changed bindings are sent when
-        `previous` is given. `macro_map` remaps macro ids (for imports)."""
+        `previous` is given. `macro_map` remaps macro ids (for imports).
+
+        Bindings for buttons this mouse doesn't have (e.g. a profile from
+        another model) are skipped and returned as (button, layer) pairs."""
         report = progress or (lambda msg, frac: None)
         if slot not in self.profiles():
             self.create_profile(slot)
+        available = set(self.buttons())
         items = sorted(data.bindings.items())
+        skipped = [key for key, _ in items if key[0] not in available]
+        items = [(key, action) for key, action in items if key[0] in available]
         for n, ((button, layer), action) in enumerate(items):
             if macro_map and action.macro_id in macro_map:
                 times = action.macro_times
@@ -525,15 +534,16 @@ class NagaDevice:
             self.set_dpi_stages(slot, data.dpi_stages, data.dpi_active)
         if data.polling_interval:
             self.set_polling_interval(slot, data.polling_interval)
-        if data.lift_off is not None and data.lift_off in LIFT_OFF and \
+        if data.lift_off is not None and \
                 (previous is None or previous.lift_off != data.lift_off):
             try:
                 self.set_lift_off(slot, data.lift_off)
             except RazerError:
-                pass  # older profile files or mice without lift-off settings
+                pass  # a mouse without lift-off settings
         if data.name and data.name != (previous.name if previous else self.profile_name(slot)):
             self.set_profile_name(slot, data.name)
         report("Done", 1.0)
+        return skipped
 
     def init_profile(self, slot: int, progress: Progress | None = None) -> None:
         """Factory defaults for a new profile: buttons, DPI stages, polling."""

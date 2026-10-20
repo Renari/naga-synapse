@@ -629,19 +629,21 @@ class Controller(QObject):
                 old = m.id
                 m.id = None
                 macro_map[old] = dev.write_macro(m, progress=self.report_progress)
-            dev.write_profile(slot, data, progress=self.report_progress,
-                              macro_map=macro_map)
-            return {m.id: dev.read_macro(m.id) for m in macros}, dev.flash_usage()
+            skipped = dev.write_profile(slot, data, progress=self.report_progress,
+                                        macro_map=macro_map)
+            return {m.id: dev.read_macro(m.id) for m in macros}, dev.flash_usage(), skipped
 
         def done(result):
-            new_macros, self.flash = result
+            new_macros, self.flash, skipped = result
             self.macros.update(new_macros)
             self.profiles.pop(slot, None)
             if data.name:
                 self.names[slot] = data.name
             self.macrosChanged.emit()
             self.flashChanged.emit()
-            self.status.emit(f"Imported {Path(path).name} into profile {slot}")
+            note = (f" ({len(skipped)} bindings for buttons this mouse doesn't have "
+                    "were skipped)" if skipped else "")
+            self.status.emit(f"Imported {Path(path).name} into profile {slot}{note}")
             self.refresh_profiles(lambda: self.set_current_slot(slot))
 
         self.run(work, done)
