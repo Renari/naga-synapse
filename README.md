@@ -7,6 +7,8 @@ A Razer Synapse replacement for Linux, for the **Razer Naga V2 Pro**
 Everything is written to the mouse's **onboard memory**, so your settings keep
 working with no software running, on any computer.
 
+![Naga Synapse's Customize tab with a Naga V2 Pro connected](docs/screenshot.png)
+
 - **Onboard profiles**: all 5 slots (white/red/green/blue/cyan). Create, delete,
   rename, duplicate, activate, restore defaults, import/export to JSON, back up
   everything.
