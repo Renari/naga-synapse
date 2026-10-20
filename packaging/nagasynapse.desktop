@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Naga Synapse
+GenericName=Mouse Configuration
+Comment=Configure Razer Naga V2 Pro buttons, macros and onboard profiles
+Exec=nagasynapse
+Icon=nagasynapse
+Terminal=false
+Categories=Settings;HardwareSettings;Utility;
+Keywords=razer;naga;mouse;macro;synapse;remap;
+StartupWMClass=nagasynapse
