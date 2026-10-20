@@ -332,7 +332,7 @@ def cmd_raw(dev: NagaDevice, args) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="nagasynapse-cli",
-        description="Configure the Razer Naga V2 Pro onboard memory.",
+        description="Configure the onboard memory of the Razer Naga V2 Pro and Naga Pro.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Buttons: left right middle scrollup scrolldown tiltleft tiltright
          scrollmode dpi bottom front rear 6:1..6:6 12:1..12:12 (or 1..12)

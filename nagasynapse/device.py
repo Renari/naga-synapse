@@ -1,4 +1,4 @@
-"""High level API for the Razer Naga V2 Pro onboard memory."""
+"""High level API for the onboard memory of the Razer Naga V2 Pro and Naga Pro."""
 
 from __future__ import annotations
 
@@ -122,6 +122,7 @@ class NagaDevice:
     def __init__(self, transport: HidrawTransport, info: HidrawInfo):
         self.t = transport
         self.hid = info
+        self.model = layout.use_model(layout.model_for_pid(info.pid).key)
         self._button_ids: list[int] | None = None
 
     @classmethod

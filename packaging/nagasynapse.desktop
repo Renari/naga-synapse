@@ -2,7 +2,7 @@
 Type=Application
 Name=Naga Synapse
 GenericName=Mouse Configuration
-Comment=Configure Razer Naga V2 Pro buttons, macros and onboard profiles
+Comment=Configure Razer Naga V2 Pro and Naga Pro buttons, macros and onboard profiles
 Exec=nagasynapse
 Icon=nagasynapse
 Terminal=false

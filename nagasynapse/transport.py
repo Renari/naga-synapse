@@ -3,7 +3,7 @@
 Report layout (shared by every modern Razer device):
 
     0      status            (0 new, 1 busy, 2 ok, 3 fail, 4 timeout, 5 unsupported)
-    1      transaction id    (0x1f for the Naga V2 Pro)
+    1      transaction id    (0x1f for the Naga V2 Pro and Naga Pro)
     2..3   remaining packets (big endian)
     4      protocol type     (always 0)
     5      data size
@@ -49,6 +49,8 @@ RAZER_VID = 0x1532
 SUPPORTED_DEVICES = {
     0x00A7: ("Razer Naga V2 Pro (Wired)", 0x1F),
     0x00A8: ("Razer Naga V2 Pro (Wireless)", 0x1F),
+    0x008F: ("Razer Naga Pro (Wired)", 0x1F),
+    0x0090: ("Razer Naga Pro (Wireless)", 0x1F),
 }
 
 
@@ -282,7 +284,7 @@ def open_device(path: str | None = None) -> tuple[HidrawTransport, HidrawInfo]:
         candidates = [c for c in candidates if c.path == path] or [
             HidrawInfo(path, RAZER_VID, 0x00A7, 0, "Razer Naga V2 Pro")]
     if not candidates:
-        raise DeviceNotFound("No Razer Naga V2 Pro found. Is it plugged in?")
+        raise DeviceNotFound("No supported Razer Naga found. Is it plugged in?")
     info = candidates[0]
     tid = SUPPORTED_DEVICES.get(info.pid, ("", 0x1F))[1]
     try:
