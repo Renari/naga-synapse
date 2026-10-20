@@ -78,7 +78,17 @@ CARD_W, CARD_H = 176.0, 66.0
 LEFT_X, RIGHT_X = CX - 172 - CARD_W, CX + 166
 
 
+_CALLOUTS: dict[str, list[Callout]] = {}  # per model
+
+
 def _callouts() -> list[Callout]:
+    """Callouts for the current model (built once per model)."""
+    if layout.MODEL.key not in _CALLOUTS:
+        _CALLOUTS[layout.MODEL.key] = _build_callouts()
+    return _CALLOUTS[layout.MODEL.key]
+
+
+def _build_callouts() -> list[Callout]:
     rows = [58, 130, 202, 274, 346]
     front, rear = layout.MODEL.centre_buttons
     return [

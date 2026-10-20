@@ -573,7 +573,8 @@ class AssignPanel(QFrame):
 
     def update_categories(self) -> None:
         """Hide actions the connected mouse can't use: the scroll-mode toggle
-        needs a HyperScroll wheel (the Naga V2 Pro's scroll-mode button)."""
+        needs a HyperScroll wheel (the Naga V2 Pro's scroll-mode button).
+        Call when the connected model changes."""
         has_scroll_mode = 0x6D in layout.BUTTONS_BY_ID
         shown = 0
         for i, (key, _text) in enumerate(CATEGORIES):
@@ -586,7 +587,6 @@ class AssignPanel(QFrame):
                 shown += 1
 
     def edit(self, button: int, layer: int, action: Action):
-        self.update_categories()
         self.button, self.layer, self.current = button, layer, action
         self.title.setText(button_label(button))
         self.layer_label.setText("HYPERSHIFT LAYER" if layer else "STANDARD LAYER")
