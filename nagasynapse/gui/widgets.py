@@ -303,6 +303,7 @@ class TesterStrip(QFrame):
         self.events.setTextFormat(Qt.TextFormat.RichText)
         lay.addWidget(self.events, 1)
         self.log: list[str] = []
+        self._lone_modifier: int | None = None
         self._show()
 
     def _show(self):
@@ -345,8 +346,14 @@ class TesterStrip(QFrame):
         if ev.isAutoRepeat():
             return
         usage = hid_from_key_event(ev)
-        if usage is None or is_modifier(usage):
+        if usage is None:
             return
+        if is_modifier(usage):
+            # Shown on release if nothing else was pressed meanwhile, so a
+            # button bound to just Ctrl (or Shift, Alt, Super) shows up.
+            self._lone_modifier = usage
+            return
+        self._lone_modifier = None
         mods = 0
         m = ev.modifiers()
         for flag, bit in ((Qt.KeyboardModifier.ControlModifier, 0x01),
@@ -356,6 +363,14 @@ class TesterStrip(QFrame):
             if m & flag:
                 mods |= bit
         self._add(combo_text(mods, usage))
+
+    def keyReleaseEvent(self, ev: QKeyEvent):
+        if ev.isAutoRepeat():
+            return
+        usage = hid_from_key_event(ev)
+        if usage is not None and usage == self._lone_modifier:
+            self._add(combo_text(0, usage))
+        self._lone_modifier = None
 
     def mousePressEvent(self, ev):
         if not self.hasFocus():
