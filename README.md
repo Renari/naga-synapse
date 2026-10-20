@@ -1,7 +1,8 @@
 # Naga Synapse
 
 A Razer Synapse replacement for Linux, for the **Razer Naga V2 Pro**
-(`1532:00a7` wired, `1532:00a8` HyperSpeed receiver).
+(`1532:00a7` wired, `1532:00a8` HyperSpeed receiver) and the original
+**Razer Naga Pro** (`1532:008f` wired, `1532:0090` receiver).
 
 Everything is written to the mouse's **onboard memory**, so your settings keep
 working with no software running, on any computer.
@@ -11,8 +12,8 @@ working with no software running, on any computer.
   everything.
 - **Rebind every button**: all 30 inputs, on both the standard and the
   **Hypershift** layer. That covers the left/right/wheel buttons, wheel tilt, the
-  scroll-mode, DPI and bottom buttons, and every key on the 2-, 6- and 12-button
-  side plates. You can assign:
+  scroll-mode (V2 Pro), DPI and bottom buttons, and every key on the 2-, 6- and
+  12-button side plates. You can assign:
   - keyboard keys and combos (with turbo)
   - mouse buttons (normal, double click, turbo)
   - macros (play N times, repeat while held, toggle, sequence)
@@ -25,8 +26,10 @@ working with no software running, on any computer.
   scrolling, delays and media keys. Macros are stored on the mouse and can be
   imported and exported.
 - **Performance**: DPI stages (1–5, optional separate X/Y), polling rate,
-  sleep timer and low-battery threshold.
-- **Lighting**: logo and 12-button thumb grid, through the openrazer kernel driver.
+  lift-off distance (where the mouse supports it), sleep timer and low-battery
+  threshold.
+- **Lighting**: logo, scroll wheel and thumb grid (whichever zones the mouse
+  has), through the openrazer kernel driver.
 - A full **command-line interface** for scripting.
 
 ## Running
@@ -67,8 +70,10 @@ the app does not need openrazer, and runs fine alongside it.
   **Save**; the change is written to the mouse right away. Use
   **STANDARD / HYPERSHIFT** to switch layers. To use the Hypershift layer, first
   assign *Hypershift* to some button on the standard layer, then hold that button.
-  The side-plate selector only changes which plate is drawn; bindings for all
-  three plates are stored.
+  When the mouse reports its side plate (the Naga Pro does), the attached plate
+  is shown and marked with ●, and nothing is shown while no plate is attached.
+  Clicking another plate shows its stored bindings; bindings for all three
+  plates are stored.
 - **Macros**: press **New**, then **Record**. Type or click inside the box and
   press **Stop**. Edit the steps if needed, then **Save to mouse**. Assign the
   macro to a button on the Customize tab (category *Macro*).
@@ -118,8 +123,12 @@ Run `nagasynapse-cli --help` for the full button/action/step syntax.
   it may overwrite the onboard data when it syncs.
 - If the openrazer daemon is running, it may re-apply its own DPI or lighting
   when it starts.
-- Only tested with the wired connection. The HyperSpeed receiver uses the same
-  protocol and should work.
+- The Naga V2 Pro was only tested with the wired connection; its HyperSpeed
+  receiver uses the same protocol and should work. The Naga Pro was tested both
+  wired and through its receiver.
+- The openrazer daemon writes its saved DPI and polling rate to the mouse every
+  time it starts (falling back to 1800 DPI / 500 Hz), overriding the active
+  profile. Stop or mask it if you rely on onboard profiles.
 
 ## Development
 
@@ -133,6 +142,7 @@ afterwards checks that the active profile is unchanged.
 
 See [PROTOCOL.md](PROTOCOL.md) for the USB protocol details.
 
+The Naga Pro support was worked out and tested on a Naga Pro (firmware 1.0).
 Protocol knowledge builds on the reverse-engineering work of
 [razerqdhid](https://github.com/geezmolycos/razerqdhid) (Basilisk V3),
 [RazerNagaProV2Control](https://github.com/rom4ster/RazerNagaProV2Control) and

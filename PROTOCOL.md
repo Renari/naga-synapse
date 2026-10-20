@@ -2,7 +2,8 @@
 
 Everything here was checked against a Naga V2 Pro (wired, PID `0x00a7`) on
 firmware 1.03.00 and again after updating to 3.00.00. Both versions behave the
-same for everything below.
+same for everything below. The original Naga Pro uses the same protocol; its
+differences are listed in [Naga Pro (2020)](#naga-pro-2020) at the end.
 
 ## Transport
 
@@ -141,6 +142,40 @@ Macro content is a sequence of operations:
 
 LED ids: `04` logo, `05` thumb grid. Effects use class `0f`; see openrazer's
 `razermouse_driver.c` for the Naga V2 Pro quirks.
+
+## Naga Pro (2020)
+
+Checked on a Naga Pro (`1532:008f` wired, `1532:0090` receiver), firmware
+1.0 (`00:81` → `01 00 00 00`, USB `bcdDevice` `0x0100`). Everything above
+applies unless listed here; the transaction id is `0x1f` on both connections.
+
+- **Buttons** (`02:84` lists 30): no scroll-mode (`6d`) or DPI (`60`) button.
+  Instead `0b` is DPI up (front, factory `06 01 01`) and `0c` is DPI down
+  (rear, factory `06 01 02`). Reading a button the mouse doesn't have fails, so
+  read the list from `02:84` rather than assuming one.
+- **Factory tilt** repeats wheel up/down (`0e 01 09 00 14`, `0e 01 0a 00 14`),
+  not left/right.
+- **DPI** goes up to 20000.
+- **Side plate**: `00:b9` → `00` none, `01` 2-button, `03` 12-button,
+  `04` 6-button. The mouse also sends input report `05 0e <value>` on
+  interface 1 when the plate is swapped (`05 0e 00` while it's off). A plate
+  that isn't seated firmly can drop some buttons while still reporting its value.
+  (Not yet checked on the V2 Pro.)
+- **Layer byte**: in `02:8c` / `02:0c` replies, the layer byte echoes the layer
+  of the last *write*, not the one requested; match replies on slot and button
+  only. The data itself is for the requested layer.
+- **Lift-off distance**: `0b:8b` / `0b:0b` `slot 04 value(2)` (`0b:83` / `0b:03`
+  `slot 04 state` is calibration on/off). Values: `0000` default, `0100` /
+  `0101` / `0102` = 1 / 2 / 3 mm, `0200` / `0201` / `0202` = asymmetric
+  1–2 / 1–3 / 2–3 mm (from razerqdhid). Writing `0000` answers *fail* but does
+  reset it.
+- **Polling**: `00:0e` on the active profile applies at once; on slot 0 it is
+  accepted but ignored. The live rate is the global `00:05` / `00:85`.
+  Lift-off written to the active profile also applies at once.
+- **Flash**: about 372 KiB (`06:8e`), with the same commands.
+- **Receiver**: some commands (`00:91`, `00:93`, `00:95`, `00:9f`, `00:b8`,
+  `00:bc`) are answered only through the receiver, by the receiver itself.
+- **Lighting** (openrazer): logo, scroll wheel, and a generic matrix zone.
 
 ## Firmware updates
 
