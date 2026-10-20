@@ -138,3 +138,8 @@ Protocol knowledge builds on the reverse-engineering work of
 [RazerNagaProV2Control](https://github.com/rom4ster/RazerNagaProV2Control) and
 [openrazer](https://github.com/openrazer/openrazer). All of it was verified
 against a Naga V2 Pro on firmware 1.03 and 3.00.
+
+## License
+
+Naga Synapse is licensed under the GNU General Public License, version 2 only
+(`GPL-2.0-only`). See [LICENSE](LICENSE).
