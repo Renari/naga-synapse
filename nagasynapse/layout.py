@@ -132,6 +132,9 @@ SIDE_PLATES = {
     "side12": "12-Button",
 }
 
+# Side-plate query (00:b9) value -> plate group.
+PLATE_BY_VALUE = {0x01: "side2", 0x04: "side6", 0x03: "side12"}
+
 GROUP_NAMES = {
     "top": "Top",
     "bottom": "Bottom",

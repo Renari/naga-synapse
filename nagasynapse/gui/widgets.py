@@ -113,6 +113,13 @@ class Segmented(QWidget):
     def set_index(self, i: int) -> None:
         self.buttons[i].setChecked(True)
 
+    def clear(self) -> None:
+        """Uncheck every segment."""
+        self.group.setExclusive(False)
+        for b in self.buttons:
+            b.setChecked(False)
+        self.group.setExclusive(True)
+
 
 class KeyCaptureEdit(QLineEdit):
     """Click, then press a key or key combination."""

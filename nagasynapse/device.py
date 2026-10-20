@@ -13,7 +13,7 @@ from typing import Callable
 
 from . import layout
 from .actions import Action
-from .layout import (BUTTON_IDS, LIFT_OFF, PROFILE_SLOTS, POLLING_RATES,
+from .layout import (BUTTON_IDS, LIFT_OFF, PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES,
                      default_action)
 from .macros import Macro
 from .transport import (HidrawInfo, HidrawTransport, RazerError, STATUS_FAIL,
@@ -200,6 +200,11 @@ class NagaDevice:
             except RazerError:
                 self._button_ids = list(BUTTON_IDS)
         return self._button_ids
+
+    def side_plate(self) -> str | None:
+        """The attached side plate ("side2", "side6", "side12"), or None if
+        no plate is attached or the mouse can't tell (00:b9)."""
+        return PLATE_BY_VALUE.get(self._cmd(0x00, 0xB9, size=1).args[0])
 
     # ----------------------------------------------------------- sensor
     def lift_off(self, slot: int) -> int:

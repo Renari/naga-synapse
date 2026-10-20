@@ -34,6 +34,7 @@ class Controller(QObject):
     status = Signal(str)
     error = Signal(str)
     currentSlotChanged = Signal(int)
+    plateChanged = Signal(object)   # "side2" / "side6" / "side12", or None
 
     def __init__(self, device_path: str | None = None):
         super().__init__()
@@ -48,6 +49,8 @@ class Controller(QObject):
         self.flash: FlashUsage | None = None
         self.power: tuple[int, int] | None = None   # idle seconds, low battery %
         self.current_slot: int = 1
+        self.plate: str | None = None        # attached side plate, if the mouse reports it
+        self.plate_supported = False
         self._pending = 0
         self._connecting = False
 
@@ -152,15 +155,20 @@ class Controller(QObject):
                     power = (dev.idle_time(), dev.low_battery_threshold())
                 except RazerError:
                     power = None
+                try:
+                    plate = (True, dev.side_plate())
+                except RazerError:
+                    plate = (False, None)
             except Exception:
                 dev.close()
                 raise
-            return dev, info, enabled, active, names, macros, flash, power
+            return dev, info, enabled, active, names, macros, flash, power, plate
 
         def done(result):
             self._connecting = False
             (self.dev, self.info, self.enabled, self.active, self.names,
-             self.macros, self.flash, self.power) = result
+             self.macros, self.flash, self.power, plate) = result
+            self.plate_supported, self.plate = plate
             self._reconnect.stop()
             self._battery.start()
             self.profiles.clear()
@@ -173,6 +181,7 @@ class Controller(QObject):
             self.profilesChanged.emit()
             self.macrosChanged.emit()
             self.flashChanged.emit()
+            self.plateChanged.emit(self.plate)
             self.currentSlotChanged.emit(self.current_slot)
             self.load_profile(self.current_slot)
 
@@ -209,20 +218,26 @@ class Controller(QObject):
         self._reconnect.start()
 
     def _poll(self) -> None:
-        """Track changes made on the mouse itself (profile button, battery)."""
+        """Track changes made on the mouse itself (profile button, side plate,
+        battery)."""
         if not self.dev or self.busy:
             return
         self._ticks += 1
         with_battery = self._ticks % 20 == 0
+        with_plate = self.plate_supported
 
         def work(dev):
-            return dev.active_profile(), dev.battery() if with_battery else None
+            return (dev.active_profile(), dev.battery() if with_battery else None,
+                    dev.side_plate() if with_plate else self.plate)
 
         def done(result):
-            active, battery = result
+            active, battery, plate = result
             if active != self.active:
                 self.active = active
                 self.profilesChanged.emit()
+            if plate != self.plate:
+                self.plate = plate
+                self.plateChanged.emit(plate)
             if battery and self.info:
                 self.info.battery, self.info.charging = battery
                 self.infoChanged.emit()

@@ -100,8 +100,10 @@ PLATE_X = 8.0
 PLATE_PAD = 22.0
 
 
-def plate_tiles(plate: str) -> list[tuple[int, QRectF]]:
+def plate_tiles(plate: str | None) -> list[tuple[int, QRectF]]:
     tiles = []
+    if plate is None:
+        return tiles
     ox = PLATE_X + PLATE_PAD
     if plate == "side12":
         tw, th, gap = 112.0, 84.0, 10.0
@@ -139,7 +141,7 @@ class MouseCanvas(QWidget):
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(760, 400)
-        self.plate = "side12"
+        self.plate: str | None = None  # None: no side plate attached
         self.hypershift = False
         self.selected: int | None = None
         self.hover: int | None = None
@@ -415,6 +417,8 @@ class MouseCanvas(QWidget):
         return [fm.elidedText(l, Qt.TextElideMode.ElideRight, width) for l in lines]
 
     def _paint_plate(self, p: QPainter) -> None:
+        if self.plate is None:
+            return
         rect = plate_rect(self.plate)
         p.setFont(self._font(8.5, QFont.Weight.Bold))
         p.setPen(QColor(theme.TEXT_DIM))
