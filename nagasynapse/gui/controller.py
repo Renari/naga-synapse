@@ -17,6 +17,11 @@ from ..transport import (DeviceDisconnected, DeviceNotFound, RazerError,
                          find_event_interface)
 
 
+_PLATE_UNCHANGED = object()   # poll results for the side plate
+_PLATE_QUERY_FAILED = object()
+PLATE_QUERY_MAX_FAILURES = 3
+
+
 class _Bridge(QObject):
     done = Signal(object, object, object, bool)  # callback, result, error, quiet
     progress = Signal(str, float)
@@ -52,7 +57,10 @@ class Controller(QObject):
         self.power: tuple[int, int] | None = None   # idle seconds, low battery %
         self.current_slot: int = 1
         self.plate: str | None = None        # attached side plate, if the mouse reports it
-        self.plate_supported = False
+        self.plate_supported = False         # the mouse reports its plate (query or events)
+        self._plate_query = False            # poll 00:b9
+        self._plate_query_failures = 0
+        self._plate_seq = 0                  # bumped by every plate event
         self._event_fd = -1
         self._event_notifier: QSocketNotifier | None = None
         self._pending = 0
@@ -176,6 +184,8 @@ class Controller(QObject):
             # Switch the shared button tables here, on the GUI thread that reads them.
             use_model(self.dev.model.key)
             self.plate_supported, self.plate = plate
+            self._plate_query = self.plate_supported
+            self._plate_query_failures = 0
             self._reconnect.stop()
             self._battery.start()
             self.profiles.clear()
@@ -262,6 +272,7 @@ class Controller(QObject):
             if len(data) >= 3 and data[0] == 0x05 and data[1] == 0x0E:
                 plate = PLATE_BY_VALUE.get(data[2])
                 self.plate_supported = True
+                self._plate_seq += 1  # newer than any poll already in flight
                 if plate != self.plate:
                     self.plate = plate
                     self.plateChanged.emit(plate)
@@ -273,20 +284,36 @@ class Controller(QObject):
             return
         self._ticks += 1
         with_battery = self._ticks % 20 == 0
-        with_plate = self.plate_supported
+        with_plate = self._plate_query
+        seq = self._plate_seq
 
         def work(dev):
-            return (dev.active_profile(), dev.battery() if with_battery else None,
-                    dev.side_plate() if with_plate else self.plate)
+            active = dev.active_profile()
+            battery = dev.battery() if with_battery else None
+            plate = _PLATE_UNCHANGED
+            if with_plate:
+                # A failing plate query must not cost this tick's other updates.
+                try:
+                    plate = dev.side_plate()
+                except RazerError:
+                    plate = _PLATE_QUERY_FAILED
+            return active, battery, plate
 
         def done(result):
             active, battery, plate = result
             if active != self.active:
                 self.active = active
                 self.profilesChanged.emit()
-            if plate != self.plate:
-                self.plate = plate
-                self.plateChanged.emit(plate)
+            if plate is _PLATE_QUERY_FAILED:
+                self._plate_query_failures += 1
+                if self._plate_query_failures >= PLATE_QUERY_MAX_FAILURES:
+                    self._plate_query = False  # stop asking; plate events still work
+            elif plate is not _PLATE_UNCHANGED:
+                self._plate_query_failures = 0
+                # Skip the result if a plate event arrived while this poll ran.
+                if seq == self._plate_seq and plate != self.plate:
+                    self.plate = plate
+                    self.plateChanged.emit(plate)
             if battery and self.info:
                 self.info.battery, self.info.charging = battery
                 self.infoChanged.emit()
