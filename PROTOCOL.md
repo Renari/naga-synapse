@@ -179,17 +179,51 @@ applies unless listed here; the transaction id is `0x1f` on both connections.
 
 ## Firmware updates
 
+This section was captured from a **Naga V2 Pro only**: the mouse, wired,
+updated from 1.03.00 to 3.00.00. The receiver wasn't connected, so its update
+was not captured. Nothing here has been checked on the Naga Pro (2020) or any
+other model.
+
 Razer's Windows updater (`NagaV2Pro_00A800A7_FirmwareUpdater_v3.00.00_r1.exe`)
 is a .NET program. Its embedded `DeviceUpdater.resources` holds the
 configuration and the firmware images, stored as plain Intel HEX lines
 (`Dev1FWLine*` for the receiver, `Dev2FWLine*` for the mouse).
 
-- The mouse uses a Nordic chip. To flash, the updater reboots it into a
-  bootloader that enumerates as `1532:110E` (bcdDevice `0x0200`), then returns
-  to `1532:00a7` when done. The 3.00 update took about 95 s.
-- Flashing uses the same 90-byte feature reports. The bootloader is polled
-  with `00:86` before and after.
-- The updater resets the mouse to factory settings (`BacktoDefault`).
+The mouse uses a Nordic chip. To flash it, the updater reboots it into a
+bootloader that enumerates as `1532:110E` (bcdDevice `0x0200`), then returns
+to `1532:00a7` when done. The bootloader uses the same 90-byte feature reports
+and CRC on interface 0, with these differences:
+
+- The updater sends transaction id `0x00` (`0x08` for `00:86`), not `0x1f`.
+- The size byte doesn't cover the payload: `10:02` says 8 and `10:83` says 5,
+  though both carry up to 64 data bytes. Copy the sizes below as-is.
+- Addresses are 4 bytes, big endian.
+
+The updater's sequence:
+
+| step | cmd | args → response |
+|---|---|---|
+| 1 | `00:87` | → `01 03 00 00 00 00 00 00` (version 1.03) |
+| 2 | `00:04` | `01 00` reboots into the bootloader. There is no reply; `1532:110E` appears about 3 s later. |
+| 3 | `10:80` | → `07 17 10 00 00 00 00 00 a7` (meaning unknown; `a7` is the mouse's PID). Sent again between each of the later steps. |
+| 4 | `10:01` | `start(4) end(4)` → echo: `00027000 00066dbc` (end is exclusive) |
+| 5 | `10:02` | `len start(4) data(len)` → echo. 64-byte chunks in address order; the last one is 60 bytes. |
+| 6 | `10:83` | `len start(4)` → `len start(4) data(len)`. Reads back every chunk. |
+| 7 | `10:05` | No args or reply. Leaves the bootloader; `1532:00a7` appears about 11 s later. |
+| 8 | `00:87` | → `03 00 00 00 00 00 00 00` (version 3.00) |
+| 9 | `00:0b` | `01` → `01`. Factory reset (`BacktoDefault`); the reply takes about 4 s. |
+
+- Only `0x27000`–`0x66dbc` is written (255.4 KiB, 4087 chunks). It starts with
+  a Cortex-M vector table. Nothing below `0x27000` is touched.
+- `10:01` answers at once. The first chunk of each 4 KiB page takes about
+  130 ms instead of 8 ms, so the bootloader erases each page as it reaches it.
+- The updater also polls `00:86` from another thread (→ `00 00` in the
+  firmware; the bootloader answers *unsupported*). If a poll lands between a
+  `10:02` and its reply, the updater writes that chunk again. This happened 9
+  times in the 3.00 capture, and the readback still matched.
+- For 3.00, writing took about 42 s and the readback about 37 s. The whole
+  update took about 97 s from `00:04` until the mouse came back, plus 4 s for
+  the reset.
 - To run the updater in a VM, pass through the USB *port* (QEMU
   `usb-host,hostbus=…,hostport=…`) rather than the device ID, and give your user
   access to `1532:110E`:
