@@ -3,7 +3,7 @@
 Report layout (shared by every modern Razer device):
 
     0      status            (0 new, 1 busy, 2 ok, 3 fail, 4 timeout, 5 unsupported)
-    1      transaction id    (0x1f for the Naga V2 Pro)
+    1      transaction id    (0x1f for the Naga V2 Pro and Naga Pro)
     2..3   remaining packets (big endian)
     4      protocol type     (always 0)
     5      data size
@@ -49,6 +49,8 @@ RAZER_VID = 0x1532
 SUPPORTED_DEVICES = {
     0x00A7: ("Razer Naga V2 Pro (Wired)", 0x1F),
     0x00A8: ("Razer Naga V2 Pro (Wireless)", 0x1F),
+    0x008F: ("Razer Naga Pro (Wired)", 0x1F),
+    0x0090: ("Razer Naga Pro (Wireless)", 0x1F),
 }
 
 
@@ -135,6 +137,7 @@ class HidrawInfo:
     pid: int
     interface: int
     name: str
+    phys: str = ""      # HID_PHYS, e.g. "usb-0000:0d:00.3-2.4.2.1/input0"
 
 
 def _read_uevent(path: Path) -> dict[str, str]:
@@ -175,9 +178,23 @@ def find_control_interfaces() -> list[HidrawInfo]:
         interface = int(phys.rsplit("input", 1)[-1]) if "input" in phys else -1
         found.append(HidrawInfo(
             path=f"/dev/{node.name}", vid=vid, pid=pid, interface=interface,
-            name=SUPPORTED_DEVICES[pid][0],
+            name=SUPPORTED_DEVICES[pid][0], phys=phys,
         ))
     return found
+
+
+def find_event_interface(info: HidrawInfo) -> str | None:
+    """hidraw node of the same mouse's USB interface 1.
+
+    That interface carries the mouse's notification reports (report id 5),
+    e.g. `05 0e <plate>` when the side plate is swapped on the Naga Pro."""
+    if "/input" not in info.phys:
+        return None
+    wanted = info.phys.rsplit("/input", 1)[0] + "/input1"
+    for node in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
+        if _read_uevent(node / "device" / "uevent").get("HID_PHYS") == wanted:
+            return f"/dev/{node.name}"
+    return None
 
 
 class HidrawTransport:
@@ -282,7 +299,7 @@ def open_device(path: str | None = None) -> tuple[HidrawTransport, HidrawInfo]:
         candidates = [c for c in candidates if c.path == path] or [
             HidrawInfo(path, RAZER_VID, 0x00A7, 0, "Razer Naga V2 Pro")]
     if not candidates:
-        raise DeviceNotFound("No Razer Naga V2 Pro found. Is it plugged in?")
+        raise DeviceNotFound("No supported Razer Naga found. Is it plugged in?")
     info = candidates[0]
     tid = SUPPORTED_DEVICES.get(info.pid, ("", 0x1F))[1]
     try:

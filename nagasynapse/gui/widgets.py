@@ -113,6 +113,13 @@ class Segmented(QWidget):
     def set_index(self, i: int) -> None:
         self.buttons[i].setChecked(True)
 
+    def clear(self) -> None:
+        """Uncheck every segment."""
+        self.group.setExclusive(False)
+        for b in self.buttons:
+            b.setChecked(False)
+        self.group.setExclusive(True)
+
 
 class KeyCaptureEdit(QLineEdit):
     """Click, then press a key or key combination."""
@@ -296,6 +303,10 @@ class TesterStrip(QFrame):
         self.events.setTextFormat(Qt.TextFormat.RichText)
         lay.addWidget(self.events, 1)
         self.log: list[str] = []
+        # Modifier-only chords (a button bound to just Ctrl, or Ctrl+Shift):
+        self._held_mods: list[int] = []   # modifiers currently down
+        self._chord: list[int] = []       # modifiers pressed since none were held
+        self._chord_clean = False         # nothing else pressed meanwhile
         self._show()
 
     def _show(self):
@@ -322,6 +333,7 @@ class TesterStrip(QFrame):
 
     def focusOutEvent(self, ev):
         super().focusOutEvent(ev)
+        self._held_mods, self._chord, self._chord_clean = [], [], False
         self.log.clear()
         self._show()
 
@@ -338,8 +350,19 @@ class TesterStrip(QFrame):
         if ev.isAutoRepeat():
             return
         usage = hid_from_key_event(ev)
-        if usage is None or is_modifier(usage):
+        if usage is None:
             return
+        if is_modifier(usage):
+            # Shown when the last modifier is released, if nothing else was
+            # pressed meanwhile; otherwise it was part of a combo.
+            if not self._held_mods:
+                self._chord, self._chord_clean = [], True
+            if usage not in self._held_mods:
+                self._held_mods.append(usage)
+            if usage not in self._chord:
+                self._chord.append(usage)
+            return
+        self._chord_clean = False
         mods = 0
         m = ev.modifiers()
         for flag, bit in ((Qt.KeyboardModifier.ControlModifier, 0x01),
@@ -350,13 +373,27 @@ class TesterStrip(QFrame):
                 mods |= bit
         self._add(combo_text(mods, usage))
 
+    def keyReleaseEvent(self, ev: QKeyEvent):
+        if ev.isAutoRepeat():
+            return
+        usage = hid_from_key_event(ev)
+        if usage not in self._held_mods:
+            return
+        self._held_mods.remove(usage)
+        if not self._held_mods:
+            if self._chord_clean and self._chord:
+                self._add(" + ".join(combo_text(0, u) for u in self._chord))
+            self._chord, self._chord_clean = [], False
+
     def mousePressEvent(self, ev):
         if not self.hasFocus():
             self.setFocus()
             return
+        self._chord_clean = False
         self._add(self.BUTTONS.get(ev.button(), f"Mouse {ev.button()}"))
 
     def wheelEvent(self, ev):
+        self._chord_clean = False
         d = ev.angleDelta()
         if d.y():
             self._add("Scroll Up" if d.y() > 0 else "Scroll Down")

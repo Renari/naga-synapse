@@ -1,13 +1,14 @@
-"""PERFORMANCE tab: sensitivity stages and polling rate."""
+"""PERFORMANCE tab: sensitivity stages, polling rate and lift-off distance."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout,
-                               QLabel, QPushButton, QRadioButton, QScrollArea, QSlider,
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
+                               QHBoxLayout, QLabel, QPushButton, QRadioButton, QScrollArea,
+                               QSlider, QSpinBox, QVBoxLayout, QWidget)
 
-from ..layout import DPI_MAX, DPI_MIN, MAX_DPI_STAGES, POLLING_RATES
+from .. import layout
+from ..layout import DPI_MAX, DPI_MIN, LIFT_OFF, MAX_DPI_STAGES, POLLING_RATES
 from .controller import Controller
 from .widgets import Segmented, dim, section
 
@@ -49,6 +50,11 @@ class StageRow:
         self.slider.blockSignals(False)
         if self.linked:
             self.y.setValue(value)
+
+    def set_maximum(self, maximum: int):
+        self.slider.setRange(DPI_MIN // STEP, maximum // STEP)
+        for spin in (self.x, self.y):
+            spin.setMaximum(maximum)
 
     def set_visible(self, visible: bool, xy: bool):
         for w in (self.radio, self.slider, self.x):
@@ -95,7 +101,7 @@ class PerformancePage(QWidget):
         self.xy = QCheckBox("Separate X / Y sensitivity")
         head.addWidget(self.xy)
         lay.addLayout(head)
-        lay.addWidget(dim("The DPI button cycles through these stages. The selected stage "
+        lay.addWidget(dim("The DPI button(s) step through these stages. The selected stage "
                           "is the one the profile starts with."))
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
@@ -130,6 +136,26 @@ class PerformancePage(QWidget):
         row.addStretch(1)
         lay.addLayout(row)
         root.addWidget(panel)
+
+        # ---- lift-off (only shown when the mouse supports it)
+        self.lift_panel = QFrame()
+        self.lift_panel.setObjectName("Panel")
+        lay = QVBoxLayout(self.lift_panel)
+        lay.setContentsMargins(20, 18, 20, 18)
+        lay.setSpacing(12)
+        lay.addWidget(section("Lift-off distance"))
+        lay.addWidget(dim("How high you can lift the mouse before it stops tracking. "
+                          "Asymmetric settings use a lower distance for landing than for "
+                          "lifting."))
+        row = QHBoxLayout()
+        self.lift = QComboBox()
+        for value, label in LIFT_OFF.items():
+            self.lift.addItem(label, value)
+        row.addWidget(self.lift)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.lift_panel.hide()
+        root.addWidget(self.lift_panel)
 
         # ---- power
         panel = QFrame()
@@ -176,6 +202,8 @@ class PerformancePage(QWidget):
         self.dpi_save.clicked.connect(self._save_dpi)
         self.dpi_revert.clicked.connect(self.refresh)
         self.rate.changed.connect(self._save_rate)
+        self.lift.activated.connect(self._save_lift)
+        ctl.connectionChanged.connect(lambda ok, _msg: ok and self._set_dpi_max(layout.dpi_max()))
         ctl.profileLoaded.connect(lambda s: s == ctl.current_slot and self.refresh())
         ctl.performanceChanged.connect(lambda s: s == ctl.current_slot and self.refresh())
         ctl.currentSlotChanged.connect(lambda _s: self.refresh())
@@ -217,6 +245,13 @@ class PerformancePage(QWidget):
         self._layout_rows()
         rate = POLLING_RATES.get(data.polling_interval, 1000)
         self.rate.set_index(RATES.index(rate) if rate in RATES else 2)
+        self.lift_panel.setVisible(data.lift_off is not None)
+        if data.lift_off is not None:
+            index = self.lift.findData(data.lift_off)
+            if index < 0:  # e.g. mouse-pad calibration, set elsewhere
+                self.lift.addItem(f"Other (0x{data.lift_off:04x})", data.lift_off)
+                index = self.lift.count() - 1
+            self.lift.setCurrentIndex(index)
         self.dpi_status.setText(f"Editing {self.ctl.profile_title(self.ctl.current_slot)}")
         self._loading = False
 
@@ -233,6 +268,13 @@ class PerformancePage(QWidget):
         stages = [row.value() for row in self.rows[:self.count.value()]]
         active = self.active.checkedId() + 1
         self.ctl.set_dpi_stages(self.ctl.current_slot, stages, active)
+
+    def _set_dpi_max(self, maximum: int) -> None:
+        for row in self.rows:
+            row.set_maximum(maximum)
+
+    def _save_lift(self, index: int) -> None:
+        self.ctl.set_lift_off(self.ctl.current_slot, self.lift.itemData(index))
 
     def _save_rate(self, index: int) -> None:
         self.ctl.set_polling(self.ctl.current_slot, RATE_TO_INTERVAL[RATES[index]])

@@ -17,7 +17,7 @@ from .main_window import MainWindow
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nagasynapse",
-                                     description="Razer Naga V2 Pro configurator")
+                                     description="Razer Naga V2 Pro / Naga Pro configurator")
     parser.add_argument("--device", help="hidraw node (auto-detected by default)")
     args, qt_args = parser.parse_known_args(argv)
 

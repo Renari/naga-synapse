@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
 
 from ..actions import Action
 from ..device import DeviceInfo, FlashUsage, NagaDevice, ProfileData
-from ..layout import default_action
+from ..layout import PLATE_BY_VALUE, default_action, use_model
 from ..macros import Macro
-from ..transport import DeviceDisconnected, DeviceNotFound, RazerError
+from ..transport import (DeviceDisconnected, DeviceNotFound, RazerError,
+                         find_event_interface)
+
+
+_PLATE_UNCHANGED = object()   # poll results for the side plate
+_PLATE_QUERY_FAILED = object()
+PLATE_QUERY_MAX_FAILURES = 3
 
 
 class _Bridge(QObject):
@@ -34,6 +41,7 @@ class Controller(QObject):
     status = Signal(str)
     error = Signal(str)
     currentSlotChanged = Signal(int)
+    plateChanged = Signal(object)   # "side2" / "side6" / "side12", or None
 
     def __init__(self, device_path: str | None = None):
         super().__init__()
@@ -48,6 +56,13 @@ class Controller(QObject):
         self.flash: FlashUsage | None = None
         self.power: tuple[int, int] | None = None   # idle seconds, low battery %
         self.current_slot: int = 1
+        self.plate: str | None = None        # attached side plate, if the mouse reports it
+        self.plate_supported = False         # the mouse reports its plate (query or events)
+        self._plate_query = False            # poll 00:b9
+        self._plate_query_failures = 0
+        self._plate_seq = 0                  # bumped by every plate event
+        self._event_fd = -1
+        self._event_notifier: QSocketNotifier | None = None
         self._pending = 0
         self._connecting = False
 
@@ -125,6 +140,7 @@ class Controller(QObject):
             callback(result)
 
     def shutdown(self) -> None:
+        self._stop_events()
         self._reconnect.stop()
         self._battery.stop()
         self._pool.shutdown(wait=True, cancel_futures=True)
@@ -152,15 +168,24 @@ class Controller(QObject):
                     power = (dev.idle_time(), dev.low_battery_threshold())
                 except RazerError:
                     power = None
+                try:
+                    plate = (True, dev.side_plate())
+                except RazerError:
+                    plate = (False, None)
             except Exception:
                 dev.close()
                 raise
-            return dev, info, enabled, active, names, macros, flash, power
+            return dev, info, enabled, active, names, macros, flash, power, plate
 
         def done(result):
             self._connecting = False
             (self.dev, self.info, self.enabled, self.active, self.names,
-             self.macros, self.flash, self.power) = result
+             self.macros, self.flash, self.power, plate) = result
+            # Switch the shared button tables here, on the GUI thread that reads them.
+            use_model(self.dev.model.key)
+            self.plate_supported, self.plate = plate
+            self._plate_query = self.plate_supported
+            self._plate_query_failures = 0
             self._reconnect.stop()
             self._battery.start()
             self.profiles.clear()
@@ -173,6 +198,8 @@ class Controller(QObject):
             self.profilesChanged.emit()
             self.macrosChanged.emit()
             self.flashChanged.emit()
+            self.plateChanged.emit(self.plate)
+            self._watch_events()
             self.currentSlotChanged.emit(self.current_slot)
             self.load_profile(self.current_slot)
 
@@ -203,26 +230,90 @@ class Controller(QObject):
 
         # Close on the worker thread so it cannot race an in-flight command.
         self._pool.submit(close)
+        self._stop_events()
         self.profiles.clear()
         self._battery.stop()
         self.connectionChanged.emit(False, msg or "The mouse was disconnected.")
         self._reconnect.start()
 
+    # ------------------------------------------------- mouse notifications
+    def _watch_events(self) -> None:
+        """Listen for the mouse's own notifications, so a side-plate swap
+        shows at once instead of on the next poll."""
+        self._stop_events()
+        path = find_event_interface(self.dev.hid) if self.dev else None
+        if not path:
+            return
+        try:
+            self._event_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        except OSError:
+            return
+        self._event_notifier = QSocketNotifier(self._event_fd, QSocketNotifier.Type.Read, self)
+        self._event_notifier.activated.connect(self._read_events)
+
+    def _stop_events(self) -> None:
+        if self._event_notifier is not None:
+            self._event_notifier.setEnabled(False)
+            self._event_notifier.deleteLater()
+            self._event_notifier = None
+        if self._event_fd >= 0:
+            os.close(self._event_fd)
+            self._event_fd = -1
+
+    def _read_events(self, *_args) -> None:
+        while self._event_fd >= 0:
+            try:
+                data = os.read(self._event_fd, 64)
+            except BlockingIOError:
+                return
+            except OSError:  # unplugged; the command channel notices too
+                self._stop_events()
+                return
+            if len(data) >= 3 and data[0] == 0x05 and data[1] == 0x0E:
+                plate = PLATE_BY_VALUE.get(data[2])
+                self.plate_supported = True
+                self._plate_seq += 1  # newer than any poll already in flight
+                if plate != self.plate:
+                    self.plate = plate
+                    self.plateChanged.emit(plate)
+
     def _poll(self) -> None:
-        """Track changes made on the mouse itself (profile button, battery)."""
+        """Track changes made on the mouse itself (profile button, side plate,
+        battery)."""
         if not self.dev or self.busy:
             return
         self._ticks += 1
         with_battery = self._ticks % 20 == 0
+        with_plate = self._plate_query
+        seq = self._plate_seq
 
         def work(dev):
-            return dev.active_profile(), dev.battery() if with_battery else None
+            active = dev.active_profile()
+            battery = dev.battery() if with_battery else None
+            plate = _PLATE_UNCHANGED
+            if with_plate:
+                # A failing plate query must not cost this tick's other updates.
+                try:
+                    plate = dev.side_plate()
+                except RazerError:
+                    plate = _PLATE_QUERY_FAILED
+            return active, battery, plate
 
         def done(result):
-            active, battery = result
+            active, battery, plate = result
             if active != self.active:
                 self.active = active
                 self.profilesChanged.emit()
+            if plate is _PLATE_QUERY_FAILED:
+                self._plate_query_failures += 1
+                if self._plate_query_failures >= PLATE_QUERY_MAX_FAILURES:
+                    self._plate_query = False  # stop asking; plate events still work
+            elif plate is not _PLATE_UNCHANGED:
+                self._plate_query_failures = 0
+                # Skip the result if a plate event arrived while this poll ran.
+                if seq == self._plate_seq and plate != self.plate:
+                    self.plate = plate
+                    self.plateChanged.emit(plate)
             if battery and self.info:
                 self.info.battery, self.info.charging = battery
                 self.infoChanged.emit()
@@ -386,6 +477,19 @@ class Controller(QObject):
 
         self.run(work, done)
 
+    def set_lift_off(self, slot: int, value: int) -> None:
+        def work(dev):
+            dev.set_lift_off(slot, value)
+            return dev.lift_off(slot)
+
+        def done(stored):
+            if slot in self.profiles:
+                self.profiles[slot].lift_off = stored
+            self.performanceChanged.emit(slot)
+            self.status.emit("Lift-off distance saved")
+
+        self.run(work, done)
+
     def set_polling(self, slot: int, interval: int) -> None:
         def work(dev):
             dev.set_polling_interval(slot, interval)
@@ -454,7 +558,7 @@ class Controller(QObject):
                     bindings = dev.read_profile(slot, progress=self.report_progress).bindings
                 for (button, layer), action in bindings.items():
                     if action.macro_id == macro_id:
-                        dev.set_binding(slot, button, layer, default_action(button))
+                        dev.set_binding(slot, button, layer, default_action(button, dev.model))
                         changed.append((slot, button, layer))
             dev.delete_macro(macro_id)
             return changed, dev.flash_usage()
@@ -525,19 +629,21 @@ class Controller(QObject):
                 old = m.id
                 m.id = None
                 macro_map[old] = dev.write_macro(m, progress=self.report_progress)
-            dev.write_profile(slot, data, progress=self.report_progress,
-                              macro_map=macro_map)
-            return {m.id: dev.read_macro(m.id) for m in macros}, dev.flash_usage()
+            skipped = dev.write_profile(slot, data, progress=self.report_progress,
+                                        macro_map=macro_map)
+            return {m.id: dev.read_macro(m.id) for m in macros}, dev.flash_usage(), skipped
 
         def done(result):
-            new_macros, self.flash = result
+            new_macros, self.flash, skipped = result
             self.macros.update(new_macros)
             self.profiles.pop(slot, None)
             if data.name:
                 self.names[slot] = data.name
             self.macrosChanged.emit()
             self.flashChanged.emit()
-            self.status.emit(f"Imported {Path(path).name} into profile {slot}")
+            note = (f" ({len(skipped)} bindings for buttons this mouse doesn't have "
+                    "were skipped)" if skipped else "")
+            self.status.emit(f"Imported {Path(path).name} into profile {slot}{note}")
             self.refresh_profiles(lambda: self.set_current_slot(slot))
 
         self.run(work, done)

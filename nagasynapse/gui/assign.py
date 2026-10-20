@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFrame, QGrid
 from ..actions import (Action, DpiOp, Kind, MOUSE_FN_NAMES, PROFILE_COLORS, ProfileOp,
                        SystemFn)
 from ..hid_usage import CONSUMER_KEYS, KEY_NAMES, MODIFIER_NAMES
+from .. import layout
 from ..layout import DPI_MAX, DPI_MIN, button_label, default_action
 from .widgets import KeyCaptureEdit, dim, hline, section
 
@@ -320,6 +321,7 @@ class DpiPage(_Page):
         self.finish()
 
     def load(self, action: Action):
+        self.clutch.setMaximum(layout.dpi_max())
         if action.kind == Kind.DPI and action.data:
             op = action.data[0]
             if self.group.button(op):
@@ -492,6 +494,7 @@ class AssignPanel(QFrame):
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             self.cats.addButton(chip, i)
             chips.addWidget(chip, i // 2, i % 2)
+        self._chip_grid = chips
         body.addLayout(chips)
         body.addWidget(hline())
 
@@ -551,12 +554,37 @@ class AssignPanel(QFrame):
         self.save_btn.setEnabled(False)
         self.revert_btn.setEnabled(False)
 
+    def clear_selection(self) -> None:
+        """Back to the empty "Select a button" state."""
+        self.button, self.current = None, None
+        self.title.setText("Select a button")
+        self.layer_label.setText("")
+        self.current_label.setText("Click any button on the mouse to change what it does.")
+        self.body.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self.revert_btn.setEnabled(False)
+
     def set_macros(self, names: dict[int, str]):
         self.macro_names = names
         self.macro_page.set_macros(names)
 
     def set_profile_names(self, names: dict[int, str]):
         self.profile_page.set_names(names)
+
+    def update_categories(self) -> None:
+        """Hide actions the connected mouse can't use: the scroll-mode toggle
+        needs a HyperScroll wheel (the Naga V2 Pro's scroll-mode button).
+        Call when the connected model changes."""
+        has_scroll_mode = 0x6D in layout.BUTTONS_BY_ID
+        shown = 0
+        for i, (key, _text) in enumerate(CATEGORIES):
+            chip = self.cats.button(i)
+            visible = key != "scroll" or has_scroll_mode
+            chip.setVisible(visible)
+            self._chip_grid.removeWidget(chip)
+            if visible:
+                self._chip_grid.addWidget(chip, shown // 2, shown % 2)
+                shown += 1
 
     def edit(self, button: int, layer: int, action: Action):
         self.button, self.layer, self.current = button, layer, action

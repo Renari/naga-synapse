@@ -1,4 +1,4 @@
-"""High level API for the Razer Naga V2 Pro onboard memory."""
+"""High level API for the onboard memory of the Razer Naga V2 Pro and Naga Pro."""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from . import layout
 from .actions import Action
-from .layout import BUTTON_IDS, PROFILE_SLOTS, POLLING_RATES, default_action
+from .layout import PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES, default_action
 from .macros import Macro
 from .transport import (HidrawInfo, HidrawTransport, RazerError, STATUS_FAIL,
                         open_device)
@@ -61,6 +62,7 @@ class ProfileData:
     dpi_stages: list[tuple[int, int]] = field(default_factory=list)
     dpi_active: int = 1
     polling_interval: int = 1
+    lift_off: int | None = None     # None when the mouse doesn't support it
 
     def binding(self, button_id: int, layer: int = 0) -> Action:
         return self.bindings.get((button_id, layer), default_action(button_id))
@@ -77,6 +79,7 @@ class ProfileData:
             "dpi_stages": [list(s) for s in self.dpi_stages],
             "dpi_active": self.dpi_active,
             "polling_rate": POLLING_RATES.get(self.polling_interval, 1000),
+            **({"lift_off": self.lift_off} if self.lift_off is not None else {}),
         }
 
     @classmethod
@@ -92,6 +95,7 @@ class ProfileData:
             dpi_stages=[(int(x), int(y)) for x, y in obj.get("dpi_stages", [])],
             dpi_active=int(obj.get("dpi_active", 1)),
             polling_interval=rate_to_interval.get(int(obj.get("polling_rate", 1000)), 1),
+            lift_off=int(obj["lift_off"]) if "lift_off" in obj else None,
         )
 
 
@@ -121,6 +125,10 @@ class NagaDevice:
     def __init__(self, transport: HidrawTransport, info: HidrawInfo):
         self.t = transport
         self.hid = info
+        # The model's tables; layout's module-level ones are switched by the
+        # caller (GUI thread / CLI), since other threads read them.
+        self.model = layout.model_for_pid(info.pid)
+        self._button_ids: list[int] | None = None
 
     @classmethod
     def open(cls, path: str | None = None) -> "NagaDevice":
@@ -181,6 +189,38 @@ class NagaDevice:
     def button_ids(self) -> list[int]:
         a = self._cmd(0x02, 0x84, size=0x50).args
         return list(a[1:1 + a[0]])
+
+    def buttons(self) -> list[int]:
+        """The buttons this mouse has, as it reports them (cached).
+
+        Reading a button the mouse doesn't have fails, so whole-profile reads
+        and resets use this list instead of a fixed one."""
+        if self._button_ids is None:
+            known = [b.id for b in self.model.buttons]
+            try:
+                self._button_ids = self.button_ids() or known
+            except RazerError:
+                self._button_ids = known
+        return self._button_ids
+
+    def side_plate(self) -> str | None:
+        """The attached side plate ("side2", "side6", "side12"), or None if
+        no plate is attached or the mouse can't tell (00:b9)."""
+        return PLATE_BY_VALUE.get(self._cmd(0x00, 0xB9, size=1).args[0])
+
+    # ----------------------------------------------------------- sensor
+    def lift_off(self, slot: int) -> int:
+        """Lift-off distance setting (see layout.LIFT_OFF)."""
+        a = self._cmd(0x0B, 0x8B, bytes([slot, 0x04]), 4).args
+        return (a[2] << 8) | a[3]
+
+    def set_lift_off(self, slot: int, value: int) -> None:
+        resp = self._cmd(0x0B, 0x0B, bytes([slot, 0x04, value >> 8, value & 0xFF]),
+                         check=False)
+        # Resetting to 0 (default) answers "fail" on the Naga Pro but does
+        # reset, so trust the read-back.
+        if resp.status != 2 and self.lift_off(slot) != value:
+            raise RazerError("lift-off write failed", resp.status)
 
     # ----------------------------------------------------------- profiles
     def profile_slot_count(self) -> int:
@@ -269,6 +309,9 @@ class NagaDevice:
         if not 1 <= len(stages) <= 5:
             raise ValueError("between 1 and 5 DPI stages are required")
         active = max(1, min(active, len(stages)))
+        top = self.model.dpi_max
+        stages = [(max(layout.DPI_MIN, min(top, x)), max(layout.DPI_MIN, min(top, y)))
+                  for x, y in stages]
         body = b"".join(struct.pack(">BHHxx", i + 1, x, y) for i, (x, y) in enumerate(stages))
         body = body.ljust(35, b"\0")
         self._cmd(0x04, 0x06, bytes([slot, active, len(stages)]) + body)
@@ -445,7 +488,7 @@ class NagaDevice:
     def read_profile(self, slot: int, progress: Progress | None = None,
                      button_ids: list[int] | None = None) -> ProfileData:
         report = progress or (lambda msg, frac: None)
-        ids = button_ids or BUTTON_IDS
+        ids = button_ids or self.buttons()
         data = ProfileData(slot=slot)
         data.name = (self.profile_name(slot) or "") if slot else "Direct"
         total = len(ids) * len(LAYERS)
@@ -455,19 +498,29 @@ class NagaDevice:
                 report(f"Reading profile {slot}…", n / total)
         data.dpi_stages, data.dpi_active = self.get_dpi_stages(slot)
         data.polling_interval = self.get_polling_interval(slot)
+        try:
+            data.lift_off = self.lift_off(slot)
+        except RazerError:
+            data.lift_off = None
         report("Done", 1.0)
         return data
 
     def write_profile(self, slot: int, data: ProfileData,
                       progress: Progress | None = None,
                       previous: ProfileData | None = None,
-                      macro_map: dict[int, int] | None = None) -> None:
+                      macro_map: dict[int, int] | None = None) -> list[tuple[int, int]]:
         """Write a whole profile. Only changed bindings are sent when
-        `previous` is given. `macro_map` remaps macro ids (for imports)."""
+        `previous` is given. `macro_map` remaps macro ids (for imports).
+
+        Bindings for buttons this mouse doesn't have (e.g. a profile from
+        another model) are skipped and returned as (button, layer) pairs."""
         report = progress or (lambda msg, frac: None)
         if slot not in self.profiles():
             self.create_profile(slot)
+        available = set(self.buttons())
         items = sorted(data.bindings.items())
+        skipped = [key for key, _ in items if key[0] not in available]
+        items = [(key, action) for key, action in items if key[0] in available]
         for n, ((button, layer), action) in enumerate(items):
             if macro_map and action.macro_id in macro_map:
                 times = action.macro_times
@@ -481,9 +534,16 @@ class NagaDevice:
             self.set_dpi_stages(slot, data.dpi_stages, data.dpi_active)
         if data.polling_interval:
             self.set_polling_interval(slot, data.polling_interval)
+        if data.lift_off is not None and \
+                (previous is None or previous.lift_off != data.lift_off):
+            try:
+                self.set_lift_off(slot, data.lift_off)
+            except RazerError:
+                pass  # a mouse without lift-off settings
         if data.name and data.name != (previous.name if previous else self.profile_name(slot)):
             self.set_profile_name(slot, data.name)
         report("Done", 1.0)
+        return skipped
 
     def init_profile(self, slot: int, progress: Progress | None = None) -> None:
         """Factory defaults for a new profile: buttons, DPI stages, polling."""
@@ -493,10 +553,13 @@ class NagaDevice:
 
     def reset_profile_bindings(self, slot: int, progress: Progress | None = None) -> None:
         report = progress or (lambda msg, frac: None)
-        total = len(BUTTON_IDS) * len(LAYERS)
+        # Only buttons with a known factory binding; anything else is left alone.
+        known = self.model.by_id
+        ids = [b for b in self.buttons() if b in known]
+        total = len(ids) * len(LAYERS)
         n = 0
         for layer in LAYERS:
-            for button in BUTTON_IDS:
-                self.set_binding(slot, button, layer, default_action(button))
+            for button in ids:
+                self.set_binding(slot, button, layer, default_action(button, self.model))
                 n += 1
                 report(f"Resetting profile {slot}…", n / total)

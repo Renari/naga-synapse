@@ -12,7 +12,7 @@ from . import __version__
 from .actions import PROFILE_COLORS, parse_action
 from .device import NagaDevice, ProfileData, backup_dir
 from .layout import (BUTTONS, GROUP_NAMES, POLLING_RATES, PROFILE_SLOTS,
-                     button_label, default_action, find_button)
+                     button_label, default_action, find_button, use_model)
 from .macros import Macro, parse_steps
 from .transport import RazerError
 
@@ -247,7 +247,7 @@ def _import_profile(dev: NagaDevice, obj: dict, slot: int) -> None:
         m.id = None
         macro_map[old_id] = dev.write_macro(m, progress=_progress)
     data = ProfileData.from_json(obj, slot)
-    dev.write_profile(slot, data, progress=_progress, macro_map=macro_map)
+    return dev.write_profile(slot, data, progress=_progress, macro_map=macro_map)
 
 
 def cmd_export(dev: NagaDevice, args) -> None:
@@ -259,8 +259,10 @@ def cmd_export(dev: NagaDevice, args) -> None:
 def cmd_import(dev: NagaDevice, args) -> None:
     slot = _slot(dev, args.profile)
     obj = json.loads(Path(args.file).read_text())
-    _import_profile(dev, obj, slot)
+    skipped = _import_profile(dev, obj, slot)
     print(f"imported {args.file} into profile {slot}")
+    if skipped:
+        print(f"skipped {len(skipped)} bindings for buttons this mouse doesn't have")
 
 
 def _backup_obj(dev: NagaDevice) -> dict:
@@ -303,8 +305,11 @@ def cmd_restore(dev: NagaDevice, args) -> None:
     dev.compact_flash(progress=_progress)
     for m in macros:
         dev.write_macro(m, progress=_progress)
+    skipped = 0
     for slot, data in profiles.items():
-        dev.write_profile(slot, data, progress=_progress)
+        skipped += len(dev.write_profile(slot, data, progress=_progress))
+    if skipped:
+        print(f"skipped {skipped} bindings for buttons this mouse doesn't have")
     for slot in dev.profiles():
         if slot not in profiles:
             dev.delete_profile(slot)
@@ -332,7 +337,7 @@ def cmd_raw(dev: NagaDevice, args) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="nagasynapse-cli",
-        description="Configure the Razer Naga V2 Pro onboard memory.",
+        description="Configure the onboard memory of the Razer Naga V2 Pro and Naga Pro.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Buttons: left right middle scrollup scrolldown tiltleft tiltright
          scrollmode dpi bottom front rear 6:1..6:6 12:1..12:12 (or 1..12)
@@ -428,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         with NagaDevice.open(args.device) as dev:
+            use_model(dev.model.key)
             dev.t.trace = args.trace
             COMMANDS[args.command](dev, args)
     except (RazerError, ValueError) as exc:

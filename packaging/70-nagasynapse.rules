@@ -1,3 +1,4 @@
-# Razer Naga V2 Pro (wired 1532:00a7, HyperSpeed receiver 1532:00a8):
-# give the logged-in user access to the configuration interface.
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="00a7|00a8", TAG+="uaccess"
+# Razer Naga V2 Pro (wired 1532:00a7, HyperSpeed receiver 1532:00a8) and
+# Naga Pro (wired 1532:008f, receiver 1532:0090): give the logged-in user
+# access to the configuration interface.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="00a7|00a8|008f|0090", TAG+="uaccess"
