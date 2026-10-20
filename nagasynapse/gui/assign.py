@@ -554,6 +554,16 @@ class AssignPanel(QFrame):
         self.save_btn.setEnabled(False)
         self.revert_btn.setEnabled(False)
 
+    def clear_selection(self) -> None:
+        """Back to the empty "Select a button" state."""
+        self.button, self.current = None, None
+        self.title.setText("Select a button")
+        self.layer_label.setText("")
+        self.current_label.setText("Click any button on the mouse to change what it does.")
+        self.body.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self.revert_btn.setEnabled(False)
+
     def set_macros(self, names: dict[int, str]):
         self.macro_names = names
         self.macro_page.set_macros(names)

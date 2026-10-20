@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Signal
 
 from ..actions import Action
 from ..device import DeviceInfo, FlashUsage, NagaDevice, ProfileData
-from ..layout import PLATE_BY_VALUE, default_action
+from ..layout import PLATE_BY_VALUE, default_action, use_model
 from ..macros import Macro
 from ..transport import (DeviceDisconnected, DeviceNotFound, RazerError,
                          find_event_interface)
@@ -173,6 +173,8 @@ class Controller(QObject):
             self._connecting = False
             (self.dev, self.info, self.enabled, self.active, self.names,
              self.macros, self.flash, self.power, plate) = result
+            # Switch the shared button tables here, on the GUI thread that reads them.
+            use_model(self.dev.model.key)
             self.plate_supported, self.plate = plate
             self._reconnect.stop()
             self._battery.start()
@@ -529,7 +531,7 @@ class Controller(QObject):
                     bindings = dev.read_profile(slot, progress=self.report_progress).bindings
                 for (button, layer), action in bindings.items():
                     if action.macro_id == macro_id:
-                        dev.set_binding(slot, button, layer, default_action(button))
+                        dev.set_binding(slot, button, layer, default_action(button, dev.model))
                         changed.append((slot, button, layer))
             dev.delete_macro(macro_id)
             return changed, dev.flash_usage()

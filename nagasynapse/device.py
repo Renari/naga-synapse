@@ -13,8 +13,7 @@ from typing import Callable
 
 from . import layout
 from .actions import Action
-from .layout import (BUTTON_IDS, LIFT_OFF, PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES,
-                     default_action)
+from .layout import LIFT_OFF, PLATE_BY_VALUE, PROFILE_SLOTS, POLLING_RATES, default_action
 from .macros import Macro
 from .transport import (HidrawInfo, HidrawTransport, RazerError, STATUS_FAIL,
                         open_device)
@@ -126,7 +125,9 @@ class NagaDevice:
     def __init__(self, transport: HidrawTransport, info: HidrawInfo):
         self.t = transport
         self.hid = info
-        self.model = layout.use_model(layout.model_for_pid(info.pid).key)
+        # The model's tables; layout's module-level ones are switched by the
+        # caller (GUI thread / CLI), since other threads read them.
+        self.model = layout.model_for_pid(info.pid)
         self._button_ids: list[int] | None = None
 
     @classmethod
@@ -195,10 +196,11 @@ class NagaDevice:
         Reading a button the mouse doesn't have fails, so whole-profile reads
         and resets use this list instead of a fixed one."""
         if self._button_ids is None:
+            known = [b.id for b in self.model.buttons]
             try:
-                self._button_ids = self.button_ids() or list(BUTTON_IDS)
+                self._button_ids = self.button_ids() or known
             except RazerError:
-                self._button_ids = list(BUTTON_IDS)
+                self._button_ids = known
         return self._button_ids
 
     def side_plate(self) -> str | None:
@@ -542,11 +544,12 @@ class NagaDevice:
     def reset_profile_bindings(self, slot: int, progress: Progress | None = None) -> None:
         report = progress or (lambda msg, frac: None)
         # Only buttons with a known factory binding; anything else is left alone.
-        ids = [b for b in self.buttons() if b in layout.BUTTONS_BY_ID]
+        known = self.model.by_id
+        ids = [b for b in self.buttons() if b in known]
         total = len(ids) * len(LAYERS)
         n = 0
         for layer in LAYERS:
             for button in ids:
-                self.set_binding(slot, button, layer, default_action(button))
+                self.set_binding(slot, button, layer, default_action(button, self.model))
                 n += 1
                 report(f"Resetting profile {slot}…", n / total)

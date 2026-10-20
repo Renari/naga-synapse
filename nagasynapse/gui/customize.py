@@ -126,14 +126,18 @@ class CustomizePage(QWidget):
     def _set_plate(self, index: int) -> None:
         self.canvas.plate = PLATES[index]
         self.settings.setValue("side_plate", PLATES[index])
-        sel = self.canvas.selected
-        if sel is not None and BUTTONS_BY_ID[sel].group.startswith("side") and \
-                BUTTONS_BY_ID[sel].group != PLATES[index]:
+        sel = BUTTONS_BY_ID.get(self.canvas.selected)
+        if sel is not None and sel.group.startswith("side") and sel.group != PLATES[index]:
             self.canvas.selected = None
+            self.panel.clear_selection()
         self.canvas.update()
 
     def _connection_changed(self, connected: bool, _msg: str) -> None:
         # The connected model decides the drawing and the available actions.
+        # A button selected on another model may not exist on this one.
+        if self.canvas.selected is not None and self.canvas.selected not in BUTTONS_BY_ID:
+            self.canvas.selected = None
+            self.panel.clear_selection()
         self.panel.update_categories()
         self.canvas.update()
 
@@ -213,6 +217,8 @@ class CustomizePage(QWidget):
     def edit_button(self, button: int, layer: int = 0) -> None:
         self.layer_seg.set_index(layer)
         self._set_layer(layer)
+        if button not in BUTTONS_BY_ID:
+            return  # e.g. a macro bound to a button this mouse doesn't have
         group = BUTTONS_BY_ID[button].group
         if group in PLATES:
             self.plate_seg.set_index(PLATES.index(group))

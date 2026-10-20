@@ -81,6 +81,10 @@ class Model:
     centre_buttons: tuple[int, int]
     aliases: tuple[tuple[str, int], ...] = ()
 
+    @property
+    def by_id(self) -> dict[int, Button]:
+        return {b.id: b for b in self.buttons}
+
 
 MODELS: dict[str, Model] = {
     "naga-v2-pro": Model(
@@ -103,6 +107,8 @@ MODEL_BY_PID: dict[int, str] = {
 
 MODEL: Model = MODELS["naga-v2-pro"]
 # Mutated in place by use_model(), so `from .layout import BUTTONS` stays valid.
+# Only switch models on the thread that reads these (the GUI thread); code on
+# other threads should use NagaDevice.model instead.
 BUTTONS: list[Button] = list(MODEL.buttons)
 BUTTONS_BY_ID: dict[int, Button] = {b.id: b for b in BUTTONS}
 BUTTON_IDS: list[int] = [b.id for b in BUTTONS]
@@ -162,8 +168,9 @@ LIFT_OFF = {
 }
 
 
-def default_action(button_id: int) -> Action:
-    button = BUTTONS_BY_ID.get(button_id)
+def default_action(button_id: int, model: Model | None = None) -> Action:
+    """Factory binding of a button, for the current model or the given one."""
+    button = (model.by_id if model else BUTTONS_BY_ID).get(button_id)
     return Action.decode(button.default) if button else Action.disabled()
 
 

@@ -12,7 +12,7 @@ from . import __version__
 from .actions import PROFILE_COLORS, parse_action
 from .device import NagaDevice, ProfileData, backup_dir
 from .layout import (BUTTONS, GROUP_NAMES, POLLING_RATES, PROFILE_SLOTS,
-                     button_label, default_action, find_button)
+                     button_label, default_action, find_button, use_model)
 from .macros import Macro, parse_steps
 from .transport import RazerError
 
@@ -428,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         with NagaDevice.open(args.device) as dev:
+            use_model(dev.model.key)
             dev.t.trace = args.trace
             COMMANDS[args.command](dev, args)
     except (RazerError, ValueError) as exc:
