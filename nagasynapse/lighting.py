@@ -2,7 +2,8 @@
 
 The Naga V2 Pro thumb grid needs model specific quirks that the openrazer
 driver already implements, so lighting is delegated to it instead of being
-re-implemented here. Requires openrazer-driver and membership of the
+re-implemented here. Zones are offered when the driver has files for them
+(the Naga Pro has a logo and a scroll wheel zone). Requires openrazer-driver and membership of the
 `openrazer` group.
 """
 
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ZONES = {
     "logo": ("Logo", "logo_matrix_effect_", "logo_led_brightness"),
+    "scroll": ("Scroll wheel", "scroll_matrix_effect_", "scroll_led_brightness"),
     "thumb": ("Thumb grid (12-button plate)", "matrix_effect_", "matrix_brightness"),
 }
 
