@@ -65,7 +65,7 @@ class CustomizePage(QWidget):
         self.canvas.plate = None
 
         self.layer_seg.changed.connect(self._set_layer)
-        self.plate_seg.changed.connect(self._set_plate)
+        self.plate_seg.changed.connect(lambda index: self._set_plate(index, remember=True))
         self.canvas.buttonSelected.connect(self._select)
         self.panel.applyRequested.connect(self._apply)
         self.panel.createMacroRequested.connect(lambda: self.openMacros.emit(None))
@@ -123,9 +123,10 @@ class CustomizePage(QWidget):
         self.canvas.hypershift = bool(layer)
         self.refresh()
 
-    def _set_plate(self, index: int) -> None:
+    def _set_plate(self, index: int, remember: bool = False) -> None:
         self.canvas.plate = PLATES[index]
-        self.settings.setValue("side_plate", PLATES[index])
+        if remember:  # only a plate the user picked; detection must not overwrite it
+            self.settings.setValue("side_plate", PLATES[index])
         sel = BUTTONS_BY_ID.get(self.canvas.selected)
         if sel is not None and sel.group.startswith("side") and sel.group != PLATES[index]:
             self.canvas.selected = None
@@ -144,27 +145,29 @@ class CustomizePage(QWidget):
     def _plate_attached(self, plate: str | None) -> None:
         """The mouse reported its side plate: mark it and show it. With no
         plate attached, nothing is selected or drawn."""
-        if not self.ctl.plate_supported:
-            # The mouse can't tell: fall back to the plate picked last time.
-            saved = self.settings.value("side_plate", "")
-            if saved in PLATES and self.canvas.plate is None:
-                self.plate_seg.set_index(PLATES.index(saved))
-                self._set_plate(PLATES.index(saved))
-            return
+        reported = plate if self.ctl.plate_supported else None
         for i, button in enumerate(self.plate_seg.buttons):
-            attached = PLATES[i] == plate
+            attached = PLATES[i] == reported
             button.setText(PLATE_LABELS[i] + (" ●" if attached else ""))
             button.setToolTip("Attached to the mouse" if attached else "")
+        if not self.ctl.plate_supported:
+            # The mouse can't tell: show the plate picked last time (12-button
+            # if none was picked yet).
+            saved = self.settings.value("side_plate", "side12")
+            index = PLATES.index(saved) if saved in PLATES else PLATES.index("side12")
+            self.plate_seg.set_index(index)
+            self._set_plate(index)
+            return
         if plate in PLATES:
             self.plate_seg.set_index(PLATES.index(plate))
             self._set_plate(PLATES.index(plate))
         else:
             self.plate_seg.clear()
             self.canvas.plate = None
-            sel = self.canvas.selected
-            if sel is not None and BUTTONS_BY_ID.get(sel) and \
-                    BUTTONS_BY_ID[sel].group.startswith("side"):
+            sel = BUTTONS_BY_ID.get(self.canvas.selected)
+            if sel is not None and sel.group.startswith("side"):
                 self.canvas.selected = None
+                self.panel.clear_selection()
             self.canvas.update()
 
     def _select(self, button: int) -> None:
